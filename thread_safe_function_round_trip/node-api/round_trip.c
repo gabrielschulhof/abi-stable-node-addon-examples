@@ -51,11 +51,11 @@ static void CallJs(napi_env env, napi_value js_cb, void* context, void* data) {
   // in `RegisterReturnValue` below, and we use the value here to decide whether
   // the data coming in from the secondary thread is stale or not.
   if (addon_data->js_accepts && !(env == NULL || js_cb == NULL)) {
-    napi_value undefined, argv[2];
+    napi_value undefined, argv[1];
     // Retrieve the JavaScript `undefined` value. This will serve as the `this`
     // value for the function call.
     assert(napi_get_undefined(env, &undefined) == napi_ok);
-
+    
     // Retrieve the constructor for the JavaScript class from which the item
     // holding the native data will be constructed.
     assert(napi_get_reference_value(env,
@@ -72,15 +72,9 @@ static void CallJs(napi_env env, napi_value js_cb, void* context, void* data) {
     // finalizer here.
     assert(napi_wrap(env, argv[0], data, NULL, NULL, NULL) == napi_ok);
 
-    // Convert the prime number to a number `napi_value` we can pass into
-    // JavaScript.
-    assert(napi_create_int32(env,
-                             ((ThreadItem*)data)->the_prime,
-                             &argv[1]) == napi_ok);
-
     // Call the JavaScript function with the item as wrapped into an instance of
     // the JavaScript `ThreadItem` class and the prime.
-    assert(napi_call_function(env, undefined, js_cb, 2, argv, NULL) == napi_ok);
+    assert(napi_call_function(env, undefined, js_cb, 1, argv, NULL) == napi_ok);
   }
 }
 
@@ -317,6 +311,16 @@ static napi_value ThreadItemConstructor(napi_env env, napi_callback_info info) {
   return NULL;
 }
 
+// Getter for the `prime` property of the `ThreadItem` class.
+static napi_value GetPrime(napi_env env, napi_callback_info info) {
+  napi_value jsthis, prime_property;
+  assert(napi_ok == napi_get_cb_info(env, info, 0, 0, &jsthis, 0));
+  ThreadItem* item;
+  assert(napi_ok == napi_unwrap(env, jsthis, (void**)&item));
+  assert(napi_ok == napi_create_int32(env, item->the_prime, &prime_property));
+  return prime_property;
+}
+
 static void addon_is_unloading(napi_env env, void* data, void* hint) {
   AddonData* addon_data = (AddonData*)data;
   uv_mutex_destroy(&(addon_data->check_status_mutex));
@@ -352,14 +356,16 @@ static void addon_is_unloading(napi_env env, void* data, void* hint) {
   assert(uv_mutex_init(&(addon_data->check_status_mutex)) == 0);
 
   napi_value thread_item_class;
-
+  napi_property_descriptor thread_item_properties[] = {
+    { "prime", 0, 0, GetPrime, 0, 0, napi_default, 0 }
+  };
   assert(napi_define_class(env,
                            "ThreadItem",
                            NAPI_AUTO_LENGTH,
                            ThreadItemConstructor,
                            addon_data,
-                           0,
-                           NULL,
+                           1,
+                           thread_item_properties,
                            &thread_item_class) == napi_ok);
   assert(napi_create_reference(env,
                                thread_item_class,
